@@ -1,26 +1,180 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --ash-50: #F6F2EA;
+  --ash-100: #EDE6DA;
+  --ash-200: #E2D7C5;
+  --sand-300: #D8CBB6;
+  --sand-400: #C5B59D;
+  --slate-400: #8E959E;
+  --slate-500: #6B7178;
+  --slate-700: #3B4046;
+  --charcoal-900: #1F2124;
+  --charcoal-950: #141618;
+  --gold-300: #DCBC85;
+  --gold-400: #C9A46B;
+  --gold-500: #B8935A;
+  --gold-600: #9E7B44;
+  --rust-500: #A4553A;
+  --rust-600: #893E26;
+  --whatsapp: #25D366;
+  --whatsapp-dark: #1EBE5D;
+
+  --background: var(--ash-50);
+  --foreground: var(--charcoal-900);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-ash-50: var(--ash-50);
+  --color-ash-100: var(--ash-100);
+  --color-ash-200: var(--ash-200);
+  --color-sand-300: var(--sand-300);
+  --color-sand-400: var(--sand-400);
+  --color-slate-400: var(--slate-400);
+  --color-slate-500: var(--slate-500);
+  --color-slate-700: var(--slate-700);
+  --color-charcoal-900: var(--charcoal-900);
+  --color-charcoal-950: var(--charcoal-950);
+  --color-gold-300: var(--gold-300);
+  --color-gold-400: var(--gold-400);
+  --color-gold-500: var(--gold-500);
+  --color-gold-600: var(--gold-600);
+  --color-rust-500: var(--rust-500);
+  --color-rust-600: var(--rust-600);
+  --color-whatsapp: var(--whatsapp);
+  --color-whatsapp-dark: var(--whatsapp-dark);
+  
+  --font-serif: var(--font-outfit), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--font-outfit), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-sans: var(--font-jakarta), system-ui, -apple-system, sans-serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--ash-50);
+  color: var(--charcoal-900);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  selection-background-color: var(--gold-500);
+  selection-color: #ffffff;
+}
+
+/* Glassmorphism primitives */
+.glass {
+  background: rgba(246, 242, 234, 0.72);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 10px 30px -8px rgba(31, 33, 36, 0.08);
+}
+
+.glass-dark {
+  background: rgba(31, 33, 36, 0.85);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 14px 40px -10px rgba(0, 0, 0, 0.35);
+}
+
+.glass-gold {
+  background: rgba(184, 147, 90, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(184, 147, 90, 0.28);
+}
+
+/* Gradients and accents */
+.gold-gradient {
+  background: linear-gradient(135deg, #DCBC85 0%, #B8935A 50%, #9E7B44 100%);
+}
+
+.gold-gradient-dark {
+  background: linear-gradient(135deg, #2D2721 0%, #1F2124 100%);
+}
+
+.text-gold-gradient {
+  background: linear-gradient(135deg, #B8935A 0%, #D4AF37 50%, #8A6D3B 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gold-glow {
+  box-shadow: 0 0 25px rgba(184, 147, 90, 0.25);
+}
+
+.gold-glow-lg {
+  box-shadow: 0 0 45px rgba(184, 147, 90, 0.35);
+}
+
+/* Pulse animation for WhatsApp button */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2.4s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+/* Custom styled range slider */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 8px;
+  background: #D8CBB6;
+  border-radius: 9999px;
+  outline: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #B8935A;
+  border: 3px solid #FFFFFF;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 15px rgba(184, 147, 90, 0.5);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #B8935A;
+  border: 3px solid #FFFFFF;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #EDE6DA;
+}
+::-webkit-scrollbar-thumb {
+  background: #C5B59D;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B8935A;
 }
