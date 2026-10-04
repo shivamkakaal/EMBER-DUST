@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { DEFAULT_SITE_CONFIG, SiteConfig } from "@/lib/site-config";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   try {
     const { data, error } = await supabaseAdmin
