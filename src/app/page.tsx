@@ -10,7 +10,6 @@ import CeramicsSection from "@/components/CeramicsSection";
 import DosageCalculator from "@/components/DosageCalculator";
 import ProductGrid from "@/components/ProductGrid";
 import StorySection from "@/components/StorySection";
-import OrderHistorySection from "@/components/OrderHistorySection";
 import FAQSection from "@/components/FAQSection";
 import Footer from "@/components/Footer";
 import WhatsAppFab from "@/components/WhatsAppFab";
@@ -58,9 +57,6 @@ function MainContent() {
 
         {/* Sourcing Provenance */}
         <StorySection />
-
-        {/* Live Consignment Tracking & Order History */}
-        <OrderHistorySection />
 
         {/* Frequently Asked Questions */}
         <FAQSection />
