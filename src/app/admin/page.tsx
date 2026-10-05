@@ -49,11 +49,28 @@ import {
   Trash2,
   FolderPlus,
   PlusCircle,
+  Bell,
+  BellRing,
+  BellOff,
+  Volume2,
+  VolumeX,
+  Smartphone,
+  Flame,
+  Radio,
+  ArrowRight,
 } from "lucide-react";
 import { PRODUCTS, Product } from "@/lib/products";
 import { buildWhatsAppUrl, DEFAULT_WHATSAPP_NUMBER } from "@/lib/whatsapp";
 import { useSiteConfig } from "@/context/SiteConfigContext";
 import { CustomProduct, CustomCategory } from "@/lib/site-config";
+import {
+  playOrderChime,
+  requestAdminNotificationPermission,
+  triggerBrowserOrderNotification,
+  registerAdminServiceWorker,
+  NewOrderNotificationData,
+} from "@/lib/admin-notifications";
+import { createClient } from "@/utils/supabase/client";
 
 interface OrderItem {
   id: string;
@@ -94,6 +111,19 @@ export default function AdminPage() {
   // Selected Order for Detail Modal
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [trackingInput, setTrackingInput] = useState("");
+
+  // Real-time Notification & PWA State
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>("default");
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [activeOrderAlert, setActiveOrderAlert] = useState<NewOrderNotificationData | null>(null);
+  const [newOrderHighlightId, setNewOrderHighlightId] = useState<string | null>(null);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+  const [showIosInstallGuide, setShowIosInstallGuide] = useState(false);
+
+  // Tracking refs for detecting brand new incoming orders
+  const knownOrderIdsRef = React.useRef<Set<string>>(new Set());
+  const isInitialLoadRef = React.useRef<boolean>(true);
 
   // Manual Order Modal State
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
@@ -307,25 +337,230 @@ export default function AdminPage() {
     }
   };
 
-  // Fetch orders from API
-  const fetchOrders = async () => {
-    setIsLoadingOrders(true);
+  // Fetch orders from API with automatic new order detection
+  const fetchOrders = async (isBackground = false) => {
+    if (!isBackground) {
+      setIsLoadingOrders(true);
+    }
     try {
       const res = await fetch("/api/admin/orders");
       const data = await res.json();
-      if (data.orders) {
+      if (data.orders && Array.isArray(data.orders)) {
+        // Detect brand-new incoming orders after initial mount
+        if (!isInitialLoadRef.current && data.orders.length > 0) {
+          const newlyArrived = data.orders.filter(
+            (o: Order) => !knownOrderIdsRef.current.has(o.id)
+          );
+
+          if (newlyArrived.length > 0) {
+            const latest = newlyArrived[0];
+
+            // 1. Play pleasant synthesizer chime
+            if (soundEnabled) {
+              playOrderChime(0.85);
+            }
+
+            // 2. Dispatch browser / OS push notification
+            triggerBrowserOrderNotification({
+              order_number: latest.order_number,
+              customer_name: latest.customer_name,
+              total: latest.total,
+              id: latest.id,
+              quantity: latest.order_items?.[0]?.quantity,
+              product_name: latest.order_items?.[0]?.product_name,
+            });
+
+            // 3. Highlight and show in-app banner
+            setActiveOrderAlert({
+              order_number: latest.order_number,
+              customer_name: latest.customer_name,
+              total: latest.total,
+              id: latest.id,
+              quantity: latest.order_items?.[0]?.quantity,
+              product_name: latest.order_items?.[0]?.product_name,
+            });
+            setNewOrderHighlightId(latest.id);
+
+            // Record into known IDs
+            newlyArrived.forEach((o: Order) => knownOrderIdsRef.current.add(o.id));
+          }
+        } else if (isInitialLoadRef.current) {
+          // Seed known order IDs on initial load so past orders don't fire alerts
+          data.orders.forEach((o: Order) => knownOrderIdsRef.current.add(o.id));
+          isInitialLoadRef.current = false;
+        }
+
         setOrders(data.orders);
       }
     } catch (err) {
       console.error("Failed to load orders:", err);
     } finally {
-      setIsLoadingOrders(false);
+      if (!isBackground) {
+        setIsLoadingOrders(false);
+      }
     }
   };
 
+  // PWA & Notification Setup on mount
+  useEffect(() => {
+    try {
+      const savedSound = localStorage.getItem("admin_sound_enabled");
+      if (savedSound !== null) {
+        setSoundEnabled(savedSound === "true");
+      }
+    } catch {}
+
+    if (typeof window !== "undefined") {
+      if ("Notification" in window) {
+        setNotificationPermission(Notification.permission);
+      }
+
+      const standalone =
+        window.matchMedia("(display-mode: standalone)").matches ||
+        (window.navigator as any).standalone === true;
+      setIsStandalone(standalone);
+
+      registerAdminServiceWorker();
+
+      const handleBeforeInstall = (e: Event) => {
+        e.preventDefault();
+        setDeferredInstallPrompt(e);
+      };
+      window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+
+      return () => {
+        window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+      };
+    }
+  }, []);
+
+  // Polling loop every 7 seconds
   useEffect(() => {
     fetchOrders();
-  }, []);
+
+    const interval = setInterval(() => {
+      fetchOrders(true);
+    }, 7000);
+
+    return () => clearInterval(interval);
+  }, [soundEnabled]);
+
+  // Real-time Supabase push listener
+  useEffect(() => {
+    let channel: any = null;
+    try {
+      const supabase = createClient();
+      channel = supabase
+        .channel("admin-orders-live-stream")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "orders" },
+          (payload: any) => {
+            const newRow = payload.new;
+            if (newRow && !knownOrderIdsRef.current.has(newRow.id)) {
+              knownOrderIdsRef.current.add(newRow.id);
+              if (soundEnabled) {
+                playOrderChime(0.85);
+              }
+              const alertData: NewOrderNotificationData = {
+                order_number: newRow.order_number,
+                customer_name: newRow.customer_name || "Guest Customer",
+                total: Number(newRow.total_amount) || 0,
+                id: newRow.id,
+              };
+              triggerBrowserOrderNotification(alertData);
+              setActiveOrderAlert(alertData);
+              setNewOrderHighlightId(newRow.id);
+              fetchOrders(true);
+            }
+          }
+        )
+        .subscribe();
+    } catch (err) {
+      console.warn("Realtime subscription fallback to polling:", err);
+    }
+
+    return () => {
+      if (channel) {
+        try {
+          const supabase = createClient();
+          supabase.removeChannel(channel);
+        } catch {}
+      }
+    };
+  }, [soundEnabled]);
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    try {
+      localStorage.setItem("admin_sound_enabled", String(next));
+    } catch {}
+    if (next) {
+      playOrderChime(0.65);
+    }
+  };
+
+  const handleEnableNotifications = async () => {
+    const perm = await requestAdminNotificationPermission();
+    setNotificationPermission(perm);
+    if (perm === "granted") {
+      if (soundEnabled) playOrderChime(0.7);
+      triggerBrowserOrderNotification({
+        order_number: "ALERTS-READY",
+        customer_name: "Ember Dust Admin HQ",
+        total: 0,
+        product_name: "Push notifications active! You will be alerted whenever any order is placed.",
+      });
+    } else if (perm === "denied") {
+      alert(
+        "Notifications are blocked in your browser settings. Please enable notifications for this site to receive order alerts."
+      );
+    }
+  };
+
+  const handleTestAlert = () => {
+    const testNum = Math.floor(1000 + Math.random() * 9000);
+    const testOrder: NewOrderNotificationData = {
+      id: "test-" + Date.now(),
+      order_number: `ED-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${testNum}`,
+      customer_name: "Aarav Sharma (Test Customer)",
+      total: 950,
+      quantity: 10,
+      product_name: "Hardwood Ash",
+    };
+
+    if (soundEnabled) {
+      playOrderChime(0.85);
+    }
+
+    triggerBrowserOrderNotification(testOrder);
+    setActiveOrderAlert(testOrder);
+    setNewOrderHighlightId(testOrder.id || null);
+  };
+
+  const handleInstallClick = async () => {
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      const { outcome } = await deferredInstallPrompt.userChoice;
+      if (outcome === "accepted") {
+        setIsStandalone(true);
+        setDeferredInstallPrompt(null);
+      }
+    } else {
+      const isIos =
+        typeof navigator !== "undefined" &&
+        /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+        !(window as any).MSStream;
+      if (isIos) {
+        setShowIosInstallGuide(true);
+      } else {
+        alert(
+          "To install Ember Dust Admin App:\n\n1. Click your browser menu (⋮ or ⎋)\n2. Tap 'Install app' or 'Add to Home screen'\n3. Open directly from your home screen as a standalone app!"
+        );
+      }
+    }
+  };
 
   const updateOrderStatus = async (
     orderId: string,
@@ -597,6 +832,121 @@ export default function AdminPage() {
 
   return (
     <div className="min-h-screen bg-[#111214] text-[#EDE6DA] font-sans pb-28 w-full max-w-full overflow-x-hidden">
+      {/* Live Order Alerts Floating Banner */}
+      {activeOrderAlert && (
+        <div className="fixed top-4 left-3 right-3 sm:left-auto sm:right-6 sm:w-[420px] z-50 bg-[#181A1D]/95 border-2 border-[#25D366] rounded-2xl p-4 shadow-2xl shadow-green-500/25 backdrop-blur-xl animate-in slide-in-from-top-4 duration-300">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-[#25D366]/20 border border-[#25D366]/40 flex items-center justify-center shrink-0">
+                <Flame className="w-5 h-5 text-[#25D366] animate-bounce" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider bg-[#25D366] text-black px-1.5 py-0.5 rounded-full">
+                    New Order Alert!
+                  </span>
+                  <span className="text-xs text-[#8E959E] font-mono">
+                    {activeOrderAlert.order_number}
+                  </span>
+                </div>
+                <h4 className="text-sm font-extrabold text-white mt-0.5">
+                  {activeOrderAlert.customer_name}
+                </h4>
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveOrderAlert(null)}
+              className="p-1 rounded-lg hover:bg-white/10 text-[#8E959E] hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="mt-3 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
+            <div className="text-white">
+              Total:{" "}
+              <span className="font-extrabold text-[#25D366] text-sm">
+                ₹{activeOrderAlert.total.toLocaleString("en-IN")}
+              </span>
+              {activeOrderAlert.quantity && (
+                <span className="text-[#8E959E] ml-1.5 font-normal">
+                  ({activeOrderAlert.quantity}kg)
+                </span>
+              )}
+            </div>
+
+            <button
+              onClick={() => {
+                setActiveTab("orders");
+                const matched = orders.find(
+                  (o) =>
+                    o.order_number === activeOrderAlert.order_number ||
+                    o.id === activeOrderAlert.id
+                );
+                if (matched) {
+                  setSelectedOrder(matched);
+                  setTrackingInput(matched.tracking_info || "");
+                }
+                setActiveOrderAlert(null);
+              }}
+              className="bg-[#25D366] hover:bg-[#1EBE5D] text-black font-extrabold px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 text-xs cursor-pointer shadow-md"
+            >
+              <span>View Order</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* iOS Safari PWA Install Guide Modal */}
+      {showIosInstallGuide && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#181A1D] border border-white/15 rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl">
+            <div className="w-14 h-14 mx-auto rounded-2xl bg-[#B8935A]/20 border border-[#B8935A]/40 flex items-center justify-center">
+              <Smartphone className="w-7 h-7 text-[#B8935A]" />
+            </div>
+            <h3 className="text-lg font-extrabold text-white">
+              Install Ember Dust HQ App
+            </h3>
+            <p className="text-xs text-[#8E959E] leading-relaxed">
+              Install Ember Dust Admin on your iPhone home screen for fast fullscreen access and standalone alerts:
+            </p>
+            <div className="bg-black/40 rounded-2xl p-4 text-left space-y-2.5 text-xs text-[#D8CBB6]">
+              <div className="flex items-center gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#B8935A] text-black font-bold flex items-center justify-center text-[10px] shrink-0">
+                  1
+                </span>
+                <span>
+                  Tap Safari&apos;s <strong>Share</strong> button (⎋ at bottom)
+                </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#B8935A] text-black font-bold flex items-center justify-center text-[10px] shrink-0">
+                  2
+                </span>
+                <span>
+                  Scroll down &amp; tap <strong>&quot;Add to Home Screen&quot;</strong>
+                </span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#B8935A] text-black font-bold flex items-center justify-center text-[10px] shrink-0">
+                  3
+                </span>
+                <span>
+                  Tap <strong>Add</strong> in top-right corner
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowIosInstallGuide(false)}
+              className="w-full bg-[#B8935A] hover:bg-[#a3804c] text-black font-extrabold py-3 rounded-2xl text-xs transition-all cursor-pointer"
+            >
+              Got it!
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Navigation Bar */}
       <header className="bg-[#181A1D]/95 backdrop-blur-md border-b border-white/10 sticky top-0 z-30 shadow-xl w-full max-w-full">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-2.5 sm:py-0 sm:h-16 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
@@ -698,6 +1048,86 @@ export default function AdminPage() {
           </div>
         </div>
       </header>
+
+      {/* Real-time Order Monitoring & PWA Toolbar */}
+      <div className="bg-[#141518] border-b border-white/5 py-1.5 px-3 sm:px-8 w-full max-w-full">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 text-xs overflow-x-auto no-scrollbar">
+          {/* Live Order Monitor Pulse & Notification Status */}
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="flex items-center gap-1.5 text-[11px] text-[#25D366] font-bold bg-[#25D366]/10 px-2.5 py-1 rounded-full border border-[#25D366]/20">
+              <span className="w-2 h-2 rounded-full bg-[#25D366] animate-ping" />
+              Live Monitor
+            </span>
+
+            {/* Audio Chime Toggle */}
+            <button
+              onClick={toggleSound}
+              className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg font-bold border transition-all cursor-pointer ${
+                soundEnabled
+                  ? "text-white bg-white/10 border-white/20 hover:bg-white/15"
+                  : "text-[#8E959E] bg-white/5 border-white/10 hover:text-white"
+              }`}
+              title={soundEnabled ? "Mute order sound chime" : "Enable order sound chime"}
+            >
+              {soundEnabled ? (
+                <Volume2 className="w-3.5 h-3.5 text-[#25D366]" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5 text-red-400" />
+              )}
+              <span>{soundEnabled ? "Chime On" : "Muted"}</span>
+            </button>
+
+            {/* Browser Push Permission Toggle */}
+            <button
+              onClick={handleEnableNotifications}
+              className={`flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg font-bold border transition-all cursor-pointer ${
+                notificationPermission === "granted"
+                  ? "text-[#25D366] bg-[#25D366]/10 border-[#25D366]/30"
+                  : "text-amber-400 bg-amber-400/10 border-amber-400/30 hover:bg-amber-400/20"
+              }`}
+              title={
+                notificationPermission === "granted"
+                  ? "Browser notifications active"
+                  : "Click to enable browser order alerts"
+              }
+            >
+              {notificationPermission === "granted" ? (
+                <BellRing className="w-3.5 h-3.5" />
+              ) : (
+                <Bell className="w-3.5 h-3.5" />
+              )}
+              <span>
+                {notificationPermission === "granted" ? "Alerts Active" : "Enable Alerts"}
+              </span>
+            </button>
+          </div>
+
+          {/* Right Tools: Test Alert & PWA Install Button */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleTestAlert}
+              className="flex items-center gap-1 text-[11px] text-[#B8935A] bg-[#B8935A]/10 hover:bg-[#B8935A]/20 px-2.5 py-1 rounded-lg font-bold border border-[#B8935A]/30 transition-all cursor-pointer"
+              title="Test the chime sound, popup, and browser notification"
+            >
+              <Sparkles className="w-3 h-3 text-[#B8935A]" />
+              <span>Test Alert</span>
+            </button>
+
+            <button
+              onClick={handleInstallClick}
+              className={`flex items-center gap-1.5 text-[11px] px-3 py-1 rounded-lg font-extrabold transition-all cursor-pointer ${
+                isStandalone
+                  ? "text-[#25D366] bg-[#25D366]/10 border border-[#25D366]/20"
+                  : "text-[#181A1D] bg-gradient-to-r from-[#B8935A] to-[#D8CBB6] hover:brightness-110 shadow-sm"
+              }`}
+              title="Install dedicated Ember Dust Admin PWA"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>{isStandalone ? "HQ App Installed" : "Install Admin App"}</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Floating Save Bar when in CMS mode */}
       {activeTab === "cms" && (
@@ -1505,7 +1935,7 @@ export default function AdminPage() {
                 </div>
 
                 <button
-                  onClick={fetchOrders}
+                  onClick={() => fetchOrders()}
                   className="p-2 rounded-xl bg-white/5 border border-white/10 text-[#8E959E] hover:text-white hover:bg-white/10 transition-colors shrink-0"
                   title="Refresh Orders"
                 >
@@ -1580,15 +2010,24 @@ export default function AdminPage() {
                           return (
                             <div
                               key={order.id}
-                              className="bg-[#1E2024] hover:bg-[#25282D] border border-white/10 rounded-xl p-3.5 space-y-2.5 transition-all shadow-md group cursor-pointer"
+                              className={`rounded-xl p-3.5 space-y-2.5 transition-all shadow-md group cursor-pointer ${
+                                newOrderHighlightId === order.id
+                                  ? "bg-[#25D366]/15 border-2 border-[#25D366] shadow-green-500/20"
+                                  : "bg-[#1E2024] hover:bg-[#25282D] border border-white/10"
+                              }`}
                               onClick={() => {
                                 setSelectedOrder(order);
                                 setTrackingInput(order.tracking_info || "");
                               }}
                             >
                               <div className="flex items-start justify-between">
-                                <span className="font-mono text-xs font-bold text-[#B8935A]">
-                                  {order.order_number}
+                                <span className="font-mono text-xs font-bold text-[#B8935A] flex items-center gap-1.5">
+                                  <span>{order.order_number}</span>
+                                  {newOrderHighlightId === order.id && (
+                                    <span className="text-[9px] bg-[#25D366] text-black font-extrabold px-1.5 py-0.5 rounded-full uppercase animate-pulse">
+                                      NEW
+                                    </span>
+                                  )}
                                 </span>
                                 <span className="text-[10px] text-white/40">
                                   {new Date(order.created_at).toLocaleDateString("en-IN", {
@@ -1674,15 +2113,24 @@ export default function AdminPage() {
                           return (
                             <tr
                               key={order.id}
-                              className="hover:bg-white/[0.03] transition-colors cursor-pointer group"
+                              className={`transition-colors cursor-pointer group ${
+                                newOrderHighlightId === order.id
+                                  ? "bg-[#25D366]/15 border-l-4 border-l-[#25D366]"
+                                  : "hover:bg-white/[0.03]"
+                              }`}
                               onClick={() => {
                                 setSelectedOrder(order);
                                 setTrackingInput(order.tracking_info || "");
                               }}
                             >
                               <td className="py-4 px-6 font-mono">
-                                <div className="font-bold text-[#F5C26B] group-hover:text-white transition-colors">
-                                  {order.order_number}
+                                <div className="font-bold text-[#F5C26B] group-hover:text-white transition-colors flex items-center gap-1.5">
+                                  <span>{order.order_number}</span>
+                                  {newOrderHighlightId === order.id && (
+                                    <span className="text-[9px] bg-[#25D366] text-black font-extrabold px-1.5 py-0.5 rounded-full uppercase animate-pulse">
+                                      NEW
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-[10px] text-[#8E959E]">
                                   {new Date(order.created_at).toLocaleDateString("en-IN", {

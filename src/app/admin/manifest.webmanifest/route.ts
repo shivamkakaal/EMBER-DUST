@@ -1,0 +1,65 @@
+import { NextResponse } from "next/server";
+
+export const dynamic = "force-static";
+
+export async function GET() {
+  const manifest = {
+    name: "Ember Dust HQ — Admin Operations",
+    short_name: "Ember Admin",
+    description: "Real-time order notifications, stock manager, and storefront configuration for Ember Dust",
+    id: "/admin",
+    start_url: "/admin",
+    scope: "/admin",
+    display: "standalone",
+    display_override: ["standalone", "window-controls-overlay"],
+    orientation: "any",
+    background_color: "#0F1013",
+    theme_color: "#181A1D",
+    icons: [
+      {
+        src: "/favicon-32x32.png",
+        sizes: "32x32",
+        type: "image/png",
+      },
+      {
+        src: "/android-chrome-192x192.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/icon-192.png",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "maskable",
+      },
+      {
+        src: "/android-chrome-512x512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "any",
+      },
+      {
+        src: "/icon-512.png",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "maskable",
+      },
+    ],
+    categories: ["business", "productivity"],
+    shortcuts: [
+      {
+        name: "Live Orders",
+        url: "/admin",
+        description: "View and manage incoming customer orders",
+      },
+    ],
+  };
+
+  return NextResponse.json(manifest, {
+    headers: {
+      "Content-Type": "application/manifest+json",
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+}
