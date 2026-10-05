@@ -32,7 +32,7 @@ function MainContent() {
           folderPath="/images/sequence"
           frameCount={135}
           framePrefix="frame_"
-          frameExtension=".jpg"
+          frameExtension=".webp"
           scrollDistance={2800}
           showOverlays={true}
         />

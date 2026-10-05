@@ -69,6 +69,15 @@ export default function RootLayout({
       lang="en"
       className={`${outfit.variable} ${jakarta.variable} antialiased`}
     >
+      <head>
+        <link
+          rel="preload"
+          as="image"
+          href="/images/sequence/frame_001.webp"
+          type="image/webp"
+          fetchPriority="high"
+        />
+      </head>
       <body className="min-h-screen bg-[#F6F2EA] text-[#1F2124] selection:bg-[#B8935A] selection:text-white font-sans">
         <SiteConfigProvider>
           {children}

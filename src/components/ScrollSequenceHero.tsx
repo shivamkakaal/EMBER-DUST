@@ -21,7 +21,7 @@ export default function ScrollSequenceHero({
   folderPath = "/images/sequence",
   frameCount = 135,
   framePrefix = "frame_",
-  frameExtension = ".jpg",
+  frameExtension = ".webp",
   scrollDistance = 2600,
   showOverlays = true,
   className = "",
@@ -34,11 +34,11 @@ export default function ScrollSequenceHero({
   const imagesRef = useRef<HTMLImageElement[]>([]);
   const currentFrameRef = useRef<number>(0);
 
-  // Loading state
-  const [loadedCount, setLoadedCount] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  // Background loading state
+  const [loadedCount, setLoadedCount] = useState<number>(1);
+  const [isInitialFrameReady, setIsInitialFrameReady] = useState<boolean>(false);
 
-  // Format frame filename with 3-digit zero padding (e.g. frame_001.jpg)
+  // Format frame filename with 3-digit zero padding (e.g. frame_001.webp)
   const getFrameUrl = useCallback(
     (index: number) => {
       const paddedIndex = String(index + 1).padStart(3, "0");
@@ -48,42 +48,62 @@ export default function ScrollSequenceHero({
   );
 
   // Render a specific frame on canvas with aspect-ratio "cover"
-  const renderFrame = useCallback((index: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+  // Intelligently falls back to nearest available loaded frame if the exact index is still streaming
+  const renderFrame = useCallback(
+    (index: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
 
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      if (!ctx) return;
 
-    const img = imagesRef.current[index];
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+      // Check if target image is ready
+      let img = imagesRef.current[index];
+      if (!img || !img.complete || img.naturalWidth === 0) {
+        // Find nearest loaded frame backward or forward
+        for (let offset = 1; offset < frameCount; offset++) {
+          const prev = index - offset;
+          if (prev >= 0 && imagesRef.current[prev]?.complete && imagesRef.current[prev]?.naturalWidth > 0) {
+            img = imagesRef.current[prev];
+            break;
+          }
+          const next = index + offset;
+          if (next < frameCount && imagesRef.current[next]?.complete && imagesRef.current[next]?.naturalWidth > 0) {
+            img = imagesRef.current[next];
+            break;
+          }
+        }
+      }
 
-    const canvasWidth = canvas.width;
-    const canvasHeight = canvas.height;
-    const imgWidth = img.naturalWidth;
-    const imgHeight = img.naturalHeight;
+      if (!img || !img.complete || img.naturalWidth === 0) return;
 
-    // Object-fit: cover scaling
-    const hRatio = canvasWidth / imgWidth;
-    const vRatio = canvasHeight / imgHeight;
-    const ratio = Math.max(hRatio, vRatio);
+      const canvasWidth = canvas.width;
+      const canvasHeight = canvas.height;
+      const imgWidth = img.naturalWidth;
+      const imgHeight = img.naturalHeight;
 
-    const centerShiftX = (canvasWidth - imgWidth * ratio) / 2;
-    const centerShiftY = (canvasHeight - imgHeight * ratio) / 2;
+      // Object-fit: cover scaling
+      const hRatio = canvasWidth / imgWidth;
+      const vRatio = canvasHeight / imgHeight;
+      const ratio = Math.max(hRatio, vRatio);
 
-    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-    ctx.drawImage(
-      img,
-      0,
-      0,
-      imgWidth,
-      imgHeight,
-      centerShiftX,
-      centerShiftY,
-      imgWidth * ratio,
-      imgHeight * ratio
-    );
-  }, []);
+      const centerShiftX = (canvasWidth - imgWidth * ratio) / 2;
+      const centerShiftY = (canvasHeight - imgHeight * ratio) / 2;
+
+      ctx.drawImage(
+        img,
+        0,
+        0,
+        imgWidth,
+        imgHeight,
+        centerShiftX,
+        centerShiftY,
+        imgWidth * ratio,
+        imgHeight * ratio
+      );
+    },
+    [frameCount]
+  );
 
   // Resize canvas to match display window and device pixel ratio (crisp retina)
   const resizeCanvas = useCallback(() => {
@@ -104,7 +124,7 @@ export default function ScrollSequenceHero({
     renderFrame(currentFrameRef.current);
   }, [renderFrame]);
 
-  // Preload images
+  // Progressive image preloader
   useEffect(() => {
     let isCancelled = false;
     const images: HTMLImageElement[] = [];
@@ -112,51 +132,98 @@ export default function ScrollSequenceHero({
 
     let loaded = 0;
 
-    // Load first frame with priority to paint initial canvas immediately
+    // 1. Instant First Frame Load: painted immediately
     const firstImg = new Image();
     firstImg.src = getFrameUrl(0);
     images[0] = firstImg;
 
-    firstImg.onload = () => {
+    const onFirstFrameReady = () => {
       if (isCancelled) return;
       loaded++;
       setLoadedCount(loaded);
+      setIsInitialFrameReady(true);
       resizeCanvas();
       renderFrame(0);
 
-      // Once frame 1 is ready, load the rest
-      loadRemainingFrames();
+      // Start prioritized streaming
+      startProgressiveStream();
     };
 
-    firstImg.onerror = () => {
-      if (isCancelled) return;
-      loadRemainingFrames();
-    };
+    if (firstImg.complete && firstImg.naturalWidth > 0) {
+      onFirstFrameReady();
+    } else {
+      firstImg.onload = onFirstFrameReady;
+      firstImg.onerror = () => {
+        if (!isCancelled) startProgressiveStream();
+      };
+    }
 
-    const loadRemainingFrames = () => {
+    // 2. Multi-tier Progressive Streaming Pipeline:
+    // Tier 1: Initial 12 frames + every 4th keyframe (smooth scrubbing ready in < 250ms)
+    // Tier 2: All remaining intermediate frames in small background batches
+    const startProgressiveStream = async () => {
+      const keyframes: number[] = [];
+      const intermediateFrames: number[] = [];
+
       for (let i = 1; i < frameCount; i++) {
-        const img = new Image();
-        img.src = getFrameUrl(i);
-        images[i] = img;
+        if (i < 14 || i % 4 === 0) {
+          keyframes.push(i);
+        } else {
+          intermediateFrames.push(i);
+        }
+      }
 
-        img.onload = () => {
-          if (isCancelled) return;
-          loaded++;
-          setLoadedCount(loaded);
+      const loadSingleFrame = (idx: number): Promise<void> => {
+        return new Promise((resolve) => {
+          if (isCancelled) return resolve();
+          const img = new Image();
+          images[idx] = img;
+          img.src = getFrameUrl(idx);
 
-          if (loaded >= Math.min(25, frameCount)) {
-            setIsLoading(false);
+          img.onload = () => {
+            if (!isCancelled) {
+              loaded++;
+              setLoadedCount(loaded);
+            }
+            resolve();
+          };
+          img.onerror = () => {
+            if (!isCancelled) {
+              loaded++;
+              setLoadedCount(loaded);
+            }
+            resolve();
+          };
+        });
+      };
+
+      const loadBatch = async (indices: number[], concurrency = 6) => {
+        const queue = [...indices];
+        const workers = Array.from({ length: concurrency }, async () => {
+          while (queue.length > 0 && !isCancelled) {
+            const nextIdx = queue.shift();
+            if (nextIdx !== undefined) {
+              await loadSingleFrame(nextIdx);
+            }
           }
-          if (loaded >= frameCount) {
-            setIsLoading(false);
-          }
-        };
+        });
+        await Promise.all(workers);
+      };
 
-        img.onerror = () => {
-          if (isCancelled) return;
-          loaded++;
-          setLoadedCount(loaded);
-        };
+      // Load keyframes first
+      await loadBatch(keyframes, 6);
+
+      // Stream remaining frames without blocking main thread
+      if (!isCancelled) {
+        if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+          (window as any).requestIdleCallback(() => {
+            loadBatch(intermediateFrames, 4);
+          });
+        } else {
+          setTimeout(() => {
+            loadBatch(intermediateFrames, 4);
+          }, 60);
+        }
       }
     };
 
@@ -247,10 +314,15 @@ export default function ScrollSequenceHero({
       ref={containerRef}
       className={`relative w-full h-screen overflow-hidden bg-[#141618] text-[#EDE6DA] select-none font-sans ${className}`}
     >
-      {/* Background Canvas */}
+      {/* Background Canvas with 0ms WebP CSS background fallback */}
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full object-cover z-0"
+        style={{
+          backgroundImage: "url('/images/sequence/frame_001.webp')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
       />
 
       {/* Subtle vignette & contrast overlay */}
@@ -267,21 +339,11 @@ export default function ScrollSequenceHero({
         </button>
       </div>
 
-      {/* Loading Overlay */}
-      {isLoading && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#141618] text-white transition-opacity duration-500">
-          <div className="relative w-20 h-20 flex items-center justify-center">
-            <div className="absolute inset-0 rounded-full border-2 border-white/10 border-t-[#B8935A] animate-spin" />
-            <div className="text-lg font-extrabold text-[#B8935A]">
-              {loadProgress}%
-            </div>
-          </div>
-          <div className="text-xs uppercase tracking-[0.25em] text-[#B8935A] mt-5 font-bold">
-            Loading Ember Sequence
-          </div>
-          <p className="text-[11px] text-[#8E959E] mt-1">
-            Preparing 1080p botanical transformation frames...
-          </p>
+      {/* Non-blocking Background Frame Streaming Indicator */}
+      {loadProgress < 100 && (
+        <div className="absolute bottom-4 right-4 z-20 hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-[10px] text-[#B8935A] font-mono pointer-events-none transition-opacity">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#B8935A] animate-pulse" />
+          <span>Streaming sequence {loadProgress}%</span>
         </div>
       )}
 
