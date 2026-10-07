@@ -98,7 +98,7 @@ interface Order {
 }
 
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState<"cms" | "orders" | "products" | "settings">("cms");
+  const [activeTab, setActiveTab] = useState<"orders" | "cms" | "products" | "settings">("orders");
   const [cmsSubTab, setCmsSubTab] = useState<"hero" | "announcement" | "products" | "shipping" | "story">("hero");
 
   // Orders State
@@ -163,6 +163,16 @@ export default function AdminPage() {
       const auth = sessionStorage.getItem("ember_admin_auth");
       if (auth === "true") {
         setIsAuthenticated(true);
+      }
+      const urlParams = new URLSearchParams(window.location.search);
+      const tabParam = urlParams.get("tab");
+      if (
+        tabParam === "orders" ||
+        tabParam === "cms" ||
+        tabParam === "products" ||
+        tabParam === "settings"
+      ) {
+        setActiveTab(tabParam as any);
       }
     } catch {
       // Ignore
@@ -687,7 +697,12 @@ export default function AdminPage() {
   // Filtered orders
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
-      const matchesStatus = statusFilter === "all" ? true : o.status === statusFilter;
+      const matchesStatus =
+        statusFilter === "all"
+          ? true
+          : statusFilter === "delivered" || statusFilter === "history"
+          ? o.status === "delivered" || o.status === "cancelled"
+          : o.status === statusFilter;
       const q = searchQuery.toLowerCase();
       const matchesSearch =
         o.order_number?.toLowerCase().includes(q) ||
@@ -996,6 +1011,36 @@ export default function AdminPage() {
           {/* Master Tabs (Horizontally scrollable smoothly on mobile) */}
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar w-full sm:w-auto pb-1 sm:pb-0 scroll-smooth">
             <button
+              onClick={() => setActiveTab("orders")}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
+                activeTab === "orders"
+                  ? "bg-[#B8935A] text-[#181A1D] shadow-lg shadow-[#B8935A]/20"
+                  : "bg-white/5 text-[#8E959E] hover:text-white hover:bg-white/10 border border-white/10"
+              }`}
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              <span>Orders &amp; History ({orders.length})</span>
+              {pendingCount > 0 && (
+                <span
+                  className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"
+                  title={`${pendingCount} pending verification`}
+                />
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab("products")}
+              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
+                activeTab === "products"
+                  ? "bg-[#B8935A] text-[#181A1D] shadow-lg shadow-[#B8935A]/20"
+                  : "bg-white/5 text-[#8E959E] hover:text-white hover:bg-white/10 border border-white/10"
+              }`}
+            >
+              <Package className="w-3.5 h-3.5" />
+              <span>Products &amp; Stock</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab("cms")}
               className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
                 activeTab === "cms"
@@ -1008,30 +1053,6 @@ export default function AdminPage() {
               {hasUnsavedChanges && (
                 <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="Unsaved changes" />
               )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab("orders")}
-              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
-                activeTab === "orders"
-                  ? "bg-[#B8935A] text-[#181A1D] shadow-lg shadow-[#B8935A]/20"
-                  : "bg-white/5 text-[#8E959E] hover:text-white hover:bg-white/10 border border-white/10"
-              }`}
-            >
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              <span>Orders ({orders.length})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("products")}
-              className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer ${
-                activeTab === "products"
-                  ? "bg-[#B8935A] text-[#181A1D] shadow-lg shadow-[#B8935A]/20"
-                  : "bg-white/5 text-[#8E959E] hover:text-white hover:bg-white/10 border border-white/10"
-              }`}
-            >
-              <Package className="w-3.5 h-3.5" />
-              <span>Products & Stock</span>
             </button>
 
             <button
@@ -1806,9 +1827,46 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* ================= TAB: ORDERS DASHBOARD ================= */}
+        {/* ================= TAB: ORDERS & HISTORY DASHBOARD ================= */}
         {activeTab === "orders" && (
           <div className="space-y-6">
+            {/* Header with Title, Live Badge & Actions */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-white/10">
+              <div>
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                    <Package className="w-6 h-6 text-[#B8935A]" />
+                    <span>Orders &amp; History</span>
+                  </h2>
+                  <span className="text-[10px] bg-[#B8935A]/20 text-[#B8935A] px-2.5 py-0.5 rounded-full font-bold uppercase border border-[#B8935A]/30">
+                    Live ({orders.length} total)
+                  </span>
+                </div>
+                <p className="text-xs text-[#8E959E] mt-1">
+                  Full consignment history, real-time dispatch tracking, customer contacts, and delivery status logs.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => fetchOrders()}
+                  className="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                  title="Refresh Orders from Server"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingOrders ? "animate-spin text-[#B8935A]" : ""}`} />
+                  <span>Refresh</span>
+                </button>
+
+                <button
+                  onClick={() => setIsManualModalOpen(true)}
+                  className="px-3.5 py-2 rounded-xl bg-[#25D366] hover:bg-[#1EBE5D] text-white text-xs font-extrabold flex items-center gap-1.5 shadow-md hover:shadow-green-500/20 transition-all cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create Order</span>
+                </button>
+              </div>
+            </div>
+
             {/* KPI Cards Row */}
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
               <div className="bg-[#181A1D] border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden shadow-lg">
@@ -1846,7 +1904,7 @@ export default function AdminPage() {
                   {processingCount}
                 </div>
                 <div className="text-[10px] text-[#8E959E] font-medium mt-1">
-                  Sieving & Packing
+                  Sieving &amp; Packing
                 </div>
               </div>
 
@@ -1881,18 +1939,18 @@ export default function AdminPage() {
             <div className="bg-[#181A1D] border border-white/10 p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4 shadow-md">
               <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-1 md:pb-0">
                 {[
-                  { id: "all", label: `All (${orders.length})` },
-                  { id: "pending", label: `Pending (${pendingCount})` },
-                  { id: "processing", label: `Processing (${processingCount})` },
-                  { id: "shipped", label: `Shipped (${shippedCount})` },
-                  { id: "delivered", label: `Delivered (${deliveredCount})` },
+                  { id: "all", label: `All Orders (${orders.length})` },
+                  { id: "pending", label: `⏳ Pending (${pendingCount})` },
+                  { id: "processing", label: `🔄 Processing (${processingCount})` },
+                  { id: "shipped", label: `🚚 In Transit (${shippedCount})` },
+                  { id: "delivered", label: `📜 Order History / Delivered (${deliveredCount})` },
                 ].map((s) => (
                   <button
                     key={s.id}
                     onClick={() => setStatusFilter(s.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
                       statusFilter === s.id
-                        ? "bg-[#B8935A] text-[#181A1D]"
+                        ? "bg-[#B8935A] text-[#181A1D] shadow-md font-extrabold"
                         : "bg-white/5 text-[#8E959E] hover:text-white hover:bg-white/10"
                     }`}
                   >
@@ -2211,8 +2269,41 @@ export default function AdminPage() {
                         })
                       ) : (
                         <tr>
-                          <td colSpan={7} className="py-16 text-center text-[#8E959E]">
-                            No orders found matching this query or filter.
+                          <td colSpan={7} className="py-16 text-center">
+                            <div className="max-w-sm mx-auto space-y-3">
+                              <div className="w-12 h-12 mx-auto rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+                                <Package className="w-6 h-6 text-[#B8935A]" />
+                              </div>
+                              <h4 className="text-sm font-extrabold text-white">
+                                {statusFilter !== "all" || searchQuery
+                                  ? "No orders found in this filter"
+                                  : "No orders in database yet"}
+                              </h4>
+                              <p className="text-xs text-[#8E959E]">
+                                {statusFilter !== "all" || searchQuery
+                                  ? "Try clearing the search query or status filter to see all orders."
+                                  : "Orders placed on the storefront will automatically appear here in real time."}
+                              </p>
+                              <div className="pt-2 flex items-center justify-center gap-2">
+                                {(statusFilter !== "all" || searchQuery) && (
+                                  <button
+                                    onClick={() => {
+                                      setStatusFilter("all");
+                                      setSearchQuery("");
+                                    }}
+                                    className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all cursor-pointer"
+                                  >
+                                    Show All Orders ({orders.length})
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => fetchOrders()}
+                                  className="px-3.5 py-1.5 rounded-xl bg-[#B8935A] text-[#181A1D] text-xs font-extrabold transition-all cursor-pointer"
+                                >
+                                  Refresh Database
+                                </button>
+                              </div>
+                            </div>
                           </td>
                         </tr>
                       )}
@@ -2731,8 +2822,33 @@ export default function AdminPage() {
                   className="p-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500 text-emerald-400 hover:text-white transition-all text-xs font-bold flex items-center justify-center gap-1.5"
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
-                  <span>Send Delivered & Dosage</span>
+                  <span>Send Delivered &amp; Dosage</span>
                 </a>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+              <a
+                href={`tel:${selectedOrder.customer_phone}`}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/10 text-xs font-bold transition-all"
+              >
+                <Phone className="w-3.5 h-3.5 text-[#25D366]" />
+                <span>Call Customer</span>
+              </a>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => window.print()}
+                  className="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white border border-white/10 text-xs font-bold transition-all cursor-pointer"
+                >
+                  Print Receipt
+                </button>
+                <button
+                  onClick={() => setSelectedOrder(null)}
+                  className="px-4 py-2 rounded-xl bg-[#B8935A] text-[#181A1D] text-xs font-extrabold transition-all cursor-pointer"
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>

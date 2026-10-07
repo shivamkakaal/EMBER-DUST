@@ -77,10 +77,11 @@ export async function POST(request: NextRequest) {
         orderNumber = orderData.order_number;
         orderId = orderData.id;
 
-        // Insert order items
+        // Insert order items (validate UUID for foreign key safety)
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(product.id || "");
         await supabaseAdmin.from("order_items").insert({
           order_id: orderId,
-          product_id: product.id,
+          product_id: isUuid ? product.id : null,
           product_name: product.name,
           quantity: clampedQty,
           unit: product.unit,
