@@ -17,6 +17,7 @@ import {
   Scale,
   Leaf,
   Layers,
+  Package,
 } from "lucide-react";
 import confetti from "canvas-confetti";
 import { Product, PRODUCTS } from "@/lib/products";
@@ -119,6 +120,36 @@ export default function OrderModal({
           unitPrice: data.unitPrice,
           whatsappUrl: data.whatsappUrl,
         });
+
+        // Persist order into customer local order history
+        try {
+          const newOrderRecord = {
+            id: data.orderId || data.orderNumber,
+            order_number: data.orderNumber,
+            product_name: selectedProduct.name,
+            product_slug: selectedProduct.slug,
+            quantity,
+            unit: "kg",
+            total: data.total,
+            customer_name: customerName,
+            customer_phone: customerPhone,
+            delivery_address: fullAddress,
+            status: "pending",
+            created_at: new Date().toISOString(),
+          };
+
+          const existingHistory = JSON.parse(
+            localStorage.getItem("ember_customer_orders") || "[]"
+          );
+          const updatedHistory = [
+            newOrderRecord,
+            ...existingHistory.filter((o: any) => o.order_number !== data.orderNumber),
+          ];
+          localStorage.setItem("ember_customer_orders", JSON.stringify(updatedHistory));
+          window.dispatchEvent(new Event("ember_orders_updated"));
+        } catch {
+          // Ignore
+        }
 
         // Open WhatsApp directly
         if (data.whatsappUrl) {
@@ -534,6 +565,15 @@ export default function OrderModal({
               >
                 <MessageSquare className="w-4 h-4 fill-white" />
                 <span>Open WhatsApp to Track Delivery</span>
+              </a>
+
+              <a
+                href="#order-history"
+                onClick={onClose}
+                className="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white py-3 px-6 rounded-2xl font-bold text-xs border border-white/15 transition-all text-center"
+              >
+                <Package className="w-3.5 h-3.5 text-[#B8935A]" />
+                <span>View in Live Order History & Tracking</span>
               </a>
 
               <button

@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { MessageSquare, Menu, X, Sparkles, Zap, ArrowRight } from "lucide-react";
+import { MessageSquare, Menu, X, Sparkles, Zap, ArrowRight, Package } from "lucide-react";
 import { useOrder } from "@/context/OrderContext";
 import { useSiteConfig } from "@/context/SiteConfigContext";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
@@ -96,6 +96,13 @@ export default function Navbar() {
               Products
             </a>
             <a
+              href="#order-history"
+              className="hover:text-[#B8935A] transition-colors py-1 flex items-center gap-1 text-[#B8935A]"
+            >
+              <Package className="w-3.5 h-3.5" />
+              <span>Track Order</span>
+            </a>
+            <a
               href="#faq"
               className="hover:text-[#B8935A] transition-colors py-1"
             >
@@ -162,6 +169,20 @@ export default function Navbar() {
             >
               <span>Interactive Price Calculator</span>
               <span className="text-xs text-[#B8935A]">⚡</span>
+            </a>
+
+            <a
+              href="#order-history"
+              onClick={() => setMobileMenuOpen(false)}
+              className="hover:text-[#B8935A] py-1.5 px-1 border-b border-[#D8CBB6]/40 flex items-center justify-between text-[#B8935A] font-bold"
+            >
+              <span className="flex items-center gap-2">
+                <Package className="w-4 h-4 text-[#B8935A]" />
+                <span>Track Order & History</span>
+              </span>
+              <span className="text-[10px] bg-[#B8935A]/15 text-[#B8935A] px-2 py-0.5 rounded-full font-bold">
+                Live Status
+              </span>
             </a>
 
             <a
