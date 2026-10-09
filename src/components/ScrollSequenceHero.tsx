@@ -34,6 +34,10 @@ export default function ScrollSequenceHero({
   const imagesRef = useRef<HTMLImageElement[]>([]);
   const currentFrameRef = useRef<number>(0);
 
+  // DOM Refs for direct 60fps updates without component re-render lag
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const phaseLabelRef = useRef<HTMLSpanElement>(null);
+
   // Background loading state
   const [loadedCount, setLoadedCount] = useState<number>(1);
   const [isInitialFrameReady, setIsInitialFrameReady] = useState<boolean>(false);
@@ -132,35 +136,7 @@ export default function ScrollSequenceHero({
 
     let loaded = 0;
 
-    // 1. Instant First Frame Load: painted immediately
-    const firstImg = new Image();
-    firstImg.src = getFrameUrl(0);
-    images[0] = firstImg;
-
-    const onFirstFrameReady = () => {
-      if (isCancelled) return;
-      loaded++;
-      setLoadedCount(loaded);
-      setIsInitialFrameReady(true);
-      resizeCanvas();
-      renderFrame(0);
-
-      // Start prioritized streaming
-      startProgressiveStream();
-    };
-
-    if (firstImg.complete && firstImg.naturalWidth > 0) {
-      onFirstFrameReady();
-    } else {
-      firstImg.onload = onFirstFrameReady;
-      firstImg.onerror = () => {
-        if (!isCancelled) startProgressiveStream();
-      };
-    }
-
-    // 2. Multi-tier Progressive Streaming Pipeline:
-    // Tier 1: Initial 12 frames + every 4th keyframe (smooth scrubbing ready in < 250ms)
-    // Tier 2: All remaining intermediate frames in small background batches
+    // 1. Multi-tier Progressive Streaming Pipeline
     const startProgressiveStream = async () => {
       const keyframes: number[] = [];
       const intermediateFrames: number[] = [];
@@ -227,6 +203,32 @@ export default function ScrollSequenceHero({
       }
     };
 
+    // 2. Instant First Frame Load: painted immediately
+    const onFirstFrameReady = () => {
+      if (isCancelled) return;
+      loaded++;
+      setLoadedCount(loaded);
+      setIsInitialFrameReady(true);
+      resizeCanvas();
+      renderFrame(0);
+
+      // Start prioritized streaming
+      startProgressiveStream();
+    };
+
+    const firstImg = new Image();
+    firstImg.src = getFrameUrl(0);
+    images[0] = firstImg;
+
+    if (firstImg.complete && firstImg.naturalWidth > 0) {
+      onFirstFrameReady();
+    } else {
+      firstImg.onload = onFirstFrameReady;
+      firstImg.onerror = () => {
+        if (!isCancelled) startProgressiveStream();
+      };
+    }
+
     return () => {
       isCancelled = true;
     };
@@ -263,6 +265,21 @@ export default function ScrollSequenceHero({
           );
           currentFrameRef.current = frameIndex;
           renderFrame(frameIndex);
+
+          // Direct DOM progress update for buttery 60fps tracking without React re-render lag
+          const pct = Math.round(self.progress * 100);
+          if (progressBarRef.current) {
+            progressBarRef.current.style.width = `${pct}%`;
+          }
+          if (phaseLabelRef.current) {
+            if (self.progress < 0.35) {
+              phaseLabelRef.current.textContent = "Phase 1: Raw Himalayan Orchard Embers";
+            } else if (self.progress < 0.7) {
+              phaseLabelRef.current.textContent = "Phase 2: 100-Mesh Sieve Precision";
+            } else {
+              phaseLabelRef.current.textContent = "Phase 3: Triple-Screened Reserve Ash";
+            }
+          }
         },
       });
 
@@ -328,24 +345,24 @@ export default function ScrollSequenceHero({
       {/* Subtle vignette & contrast overlay */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-black/65 pointer-events-none z-10" />
 
-      {/* Persistent Quick Buy Floating Badge (Skip sequence directly to checkout) */}
-      <div className="absolute top-6 right-6 z-30 hidden sm:flex items-center gap-2">
+      {/* Persistent Floating Header Actions (Skip sequence directly or Quick Buy) */}
+      <div className="absolute top-5 right-5 sm:top-6 sm:right-6 z-30 flex items-center gap-2">
+        <a
+          href="#store"
+          className="hidden sm:inline-flex items-center gap-1.5 bg-black/40 hover:bg-black/70 backdrop-blur-md text-[#EDE6DA] hover:text-white px-3.5 py-2 rounded-full text-xs font-bold border border-white/15 transition-all"
+        >
+          <span>Skip to Store</span>
+          <ArrowDown className="w-3.5 h-3.5 text-[#B8935A]" />
+        </a>
+
         <button
           onClick={() => openOrderModal()}
-          className="flex items-center gap-2 bg-[#25D366] hover:bg-[#1EBE5D] text-white px-4 py-2.5 rounded-full text-xs font-extrabold shadow-xl hover:shadow-green-500/30 transition-all transform hover:scale-105 active:scale-95"
+          className="flex items-center gap-2 bg-[#25D366] hover:bg-[#1EBE5D] text-white px-4 py-2 sm:py-2.5 rounded-full text-xs font-extrabold shadow-xl hover:shadow-green-500/30 transition-all transform hover:scale-105 active:scale-95 cursor-pointer"
         >
           <Zap className="w-3.5 h-3.5 fill-white" />
           <span>⚡ Quick Buy: 5kg for ₹475</span>
         </button>
       </div>
-
-      {/* Non-blocking Background Frame Streaming Indicator */}
-      {loadProgress < 100 && (
-        <div className="absolute bottom-4 right-4 z-20 hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-[10px] text-[#B8935A] font-mono pointer-events-none transition-opacity">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#B8935A] animate-pulse" />
-          <span>Streaming sequence {loadProgress}%</span>
-        </div>
-      )}
 
       {/* Editorial Text Overlays scrubbed by GSAP */}
       {showOverlays && (
@@ -380,17 +397,24 @@ export default function ScrollSequenceHero({
               </button>
 
               <a
+                href="#store"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-[#B8935A] hover:bg-[#9E7B44] text-[#141618] font-extrabold text-sm px-6 py-3.5 rounded-full transition-all shadow-lg hover:shadow-[#B8935A]/30 cursor-pointer"
+              >
+                <span>View Products & Store ↓</span>
+              </a>
+
+              <a
                 href="#calculator"
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white font-bold text-sm px-6 py-3.5 rounded-full border border-white/20 transition-all"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white font-bold text-sm px-5 py-3.5 rounded-full border border-white/20 transition-all"
               >
                 <Scale className="w-4 h-4" />
-                <span>Explore Bulk Calculator</span>
+                <span>Bulk Calculator</span>
               </a>
             </div>
 
             <div className="pt-3 flex items-center justify-center gap-2 text-xs uppercase tracking-[0.2em] text-[#B8935A]/90 animate-bounce">
               <ArrowDown className="w-4 h-4" />
-              <span>Scroll to scrub transformation</span>
+              <span>Scroll down to reveal transformation</span>
             </div>
           </div>
 
@@ -464,22 +488,35 @@ export default function ScrollSequenceHero({
         </div>
       )}
 
-      {/* Bottom Frame Progress Bar */}
-      <div className="absolute bottom-4 left-6 right-6 z-30 flex items-center justify-between text-[11px] text-white/50 pointer-events-none">
-        <span className="uppercase tracking-widest text-[#B8935A] font-bold">
-          Ember Dust · Frame Sequence
-        </span>
-        <div className="w-32 sm:w-48 h-1 bg-white/10 rounded-full overflow-hidden">
+      {/* Bottom Interactive Transformation Scrub Bar */}
+      <div className="absolute bottom-4 left-4 right-4 sm:left-6 sm:right-6 z-30 flex items-center justify-between text-[11px] text-white/70 select-none">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-[#B8935A] animate-pulse shrink-0" />
+          <span
+            ref={phaseLabelRef}
+            className="font-bold text-[#D8CBB6] tracking-wide text-[11px] sm:text-xs truncate max-w-[170px] sm:max-w-none"
+          >
+            Phase 1: Raw Himalayan Orchard Embers
+          </span>
+        </div>
+
+        {/* Dynamic Scrub Progress Bar */}
+        <div className="w-24 sm:w-56 h-1 bg-white/15 rounded-full overflow-hidden mx-3">
           <div
-            className="h-full bg-[#B8935A] transition-all duration-75"
-            style={{
-              width: `${((currentFrameRef.current + 1) / frameCount) * 100}%`,
-            }}
+            ref={progressBarRef}
+            className="h-full bg-gradient-to-r from-[#B8935A] to-[#25D366] transition-[width] duration-75"
+            style={{ width: "0%" }}
           />
         </div>
-        <span className="font-mono text-white/70 font-bold">
-          {String(currentFrameRef.current + 1).padStart(3, "0")} / {frameCount}
-        </span>
+
+        {/* Direct Skip Button in Bottom Bar */}
+        <a
+          href="#store"
+          className="inline-flex items-center gap-1 text-[11px] font-bold text-[#B8935A] hover:text-white uppercase tracking-wider transition-colors shrink-0"
+        >
+          <span>Jump to Store</span>
+          <ArrowDown className="w-3.5 h-3.5" />
+        </a>
       </div>
     </div>
   );

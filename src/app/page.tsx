@@ -33,7 +33,7 @@ function MainContent() {
           frameCount={135}
           framePrefix="frame_"
           frameExtension=".webp"
-          scrollDistance={2800}
+          scrollDistance={2000}
           showOverlays={true}
         />
 

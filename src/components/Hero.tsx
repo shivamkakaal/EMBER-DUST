@@ -25,7 +25,7 @@ export default function Hero() {
   const hero = config.hero;
 
   return (
-    <section className="relative overflow-hidden pt-8 pb-16 sm:pt-14 sm:pb-24 font-sans">
+    <section id="store" className="relative overflow-hidden pt-8 pb-16 sm:pt-14 sm:pb-24 font-sans">
       {/* Background radial atmosphere */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-gradient-to-b from-[#EDE6DA]/90 via-[#EDE6DA]/40 to-transparent -z-10 blur-3xl pointer-events-none" />
 
