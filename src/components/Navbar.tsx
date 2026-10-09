@@ -63,59 +63,53 @@ export default function Navbar() {
             </div>
           </Link>
 
-          {/* Desktop Navigation Links */}
-          <nav className="hidden lg:flex items-center gap-6 text-xs font-bold text-[#3B4046] uppercase tracking-wider">
+          {/* Desktop Navigation Links - Compact, single-line, elegant spacing */}
+          <nav className="hidden lg:flex items-center gap-3.5 xl:gap-6 text-xs xl:text-[13px] font-bold text-[#3B4046] tracking-wide shrink-0">
+            <a
+              href="#products"
+              className="hover:text-[#B8935A] transition-colors py-1 whitespace-nowrap"
+            >
+              Products
+            </a>
+            <a
+              href="#calculator"
+              className="hover:text-[#B8935A] transition-colors py-1 whitespace-nowrap"
+            >
+              Calculator
+            </a>
             <a
               href="#gardening"
-              className="hover:text-[#B8935A] transition-colors py-1"
+              className="hover:text-[#B8935A] transition-colors py-1 whitespace-nowrap"
             >
               Gardeners
             </a>
             <a
               href="#ceramics"
-              className="hover:text-[#B8935A] transition-colors py-1"
+              className="hover:text-[#B8935A] transition-colors py-1 whitespace-nowrap"
             >
               Ceramics
             </a>
             <a
-              href="#calculator"
-              className="hover:text-[#B8935A] transition-colors py-1"
-            >
-              Price Calculator
-            </a>
-            <a
-              href="#dosage"
-              className="hover:text-[#B8935A] transition-colors py-1"
-            >
-              Dosage Guide
-            </a>
-            <a
-              href="#products"
-              className="hover:text-[#B8935A] transition-colors py-1"
-            >
-              Products
-            </a>
-            <a
               href="#order-history"
-              className="hover:text-[#B8935A] transition-colors py-1 flex items-center gap-1 text-[#B8935A]"
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#B8935A]/10 hover:bg-[#B8935A]/20 border border-[#B8935A]/30 text-[#B8935A] transition-all whitespace-nowrap"
             >
               <Package className="w-3.5 h-3.5" />
               <span>Track Order</span>
             </a>
             <a
               href="#faq"
-              className="hover:text-[#B8935A] transition-colors py-1"
+              className="hover:text-[#B8935A] transition-colors py-1 whitespace-nowrap"
             >
               FAQ
             </a>
           </nav>
 
           {/* Action CTAs */}
-          <div className="flex items-center gap-2 sm:gap-2.5">
-            {/* Desktop Buy Now Button (Hidden on mobile to eliminate clutter) */}
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+            {/* Desktop Buy Now Button */}
             <button
               onClick={() => openOrderModal()}
-              className="hidden sm:flex items-center gap-1.5 bg-[#25D366] hover:bg-[#1EBE5D] text-white px-4 py-2.5 rounded-full text-xs font-extrabold shadow-lg hover:shadow-green-500/25 transition-all transform hover:scale-105 active:scale-95 cursor-pointer"
+              className="hidden sm:flex items-center gap-1.5 bg-[#25D366] hover:bg-[#1EBE5D] text-white px-3.5 xl:px-4 py-2 sm:py-2.5 rounded-full text-xs font-extrabold shadow-lg hover:shadow-green-500/25 transition-all transform hover:scale-105 active:scale-95 cursor-pointer whitespace-nowrap"
             >
               <Zap className="w-3.5 h-3.5 fill-white" />
               <span>⚡ Buy Now</span>
@@ -125,10 +119,11 @@ export default function Navbar() {
               href={directChatUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="hidden md:flex items-center gap-1.5 bg-[#181A1D] hover:bg-[#3B4046] text-[#EDE6DA] px-3.5 py-2.5 rounded-full text-xs font-bold border border-white/10 transition-colors"
+              aria-label="Chat on WhatsApp"
+              className="hidden md:flex items-center gap-1.5 bg-[#181A1D] hover:bg-[#3B4046] text-[#EDE6DA] px-3 xl:px-3.5 py-2 sm:py-2.5 rounded-full text-xs font-bold border border-white/10 transition-colors whitespace-nowrap"
             >
               <MessageSquare className="w-3.5 h-3.5 fill-[#25D366] text-[#25D366]" />
-              <span>WhatsApp</span>
+              <span className="hidden xl:inline">WhatsApp</span>
             </a>
 
             {/* Mobile Hamburger Menu Toggle */}
