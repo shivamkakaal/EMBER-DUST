@@ -21,6 +21,7 @@ import {
 import confetti from "canvas-confetti";
 import { Product, PRODUCTS } from "@/lib/products";
 import { calcPrice } from "@/lib/pricing";
+import { DEFAULT_WHATSAPP_NUMBER } from "@/lib/whatsapp";
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -130,7 +131,7 @@ export default function OrderModal({
       console.error("Order submit failed:", err);
       // Fallback
       window.open(
-        `https://wa.me/919876543210?text=${encodeURIComponent(
+        `https://wa.me/${DEFAULT_WHATSAPP_NUMBER}?text=${encodeURIComponent(
           `Hello Ember Dust, I want to order ${quantity} kg of ${selectedProduct.name}. My Name is ${customerName}, Phone: ${customerPhone}, Address: ${deliveryAddress}.`
         )}`,
         "_blank"

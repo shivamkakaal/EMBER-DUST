@@ -42,7 +42,7 @@ export default function Footer() {
                 className="inline-flex items-center gap-2 bg-[#25D366] hover:bg-[#1EBE5D] text-white px-4 py-2 rounded-full text-xs font-semibold shadow transition-all"
               >
                 <MessageSquare className="w-3.5 h-3.5 fill-white" />
-                <span>WhatsApp: +91 98765 43210</span>
+                <span>WhatsApp: +91 70065 06721</span>
               </a>
             </div>
           </div>

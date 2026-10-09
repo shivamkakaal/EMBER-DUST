@@ -2563,7 +2563,7 @@ export default function AdminPage() {
                         whatsapp: { ...prev.whatsapp, number: e.target.value },
                       }))
                     }
-                    placeholder="919876543210"
+                    placeholder="917006506721"
                     className="w-full bg-white/5 border border-white/15 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white focus:outline-none focus:border-[#B8935A]"
                   />
                 </div>

@@ -11,7 +11,7 @@ export interface OrderMessageParams {
   notes?: string;
 }
 
-export const DEFAULT_WHATSAPP_NUMBER = "919876543210";
+export const DEFAULT_WHATSAPP_NUMBER = "917006506721";
 
 /**
  * Builds the WhatsApp order text per PRD specifications.
