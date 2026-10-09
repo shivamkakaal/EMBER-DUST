@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   Package,
@@ -22,10 +22,16 @@ import {
   Sparkles,
   ShoppingBag,
   ArrowLeft,
+  Zap,
+  Copy,
+  Check,
+  Radio,
 } from "lucide-react";
 import { useOrder } from "@/context/OrderContext";
 import { PRODUCTS, getProductBySlug } from "@/lib/products";
 import { DEFAULT_WHATSAPP_NUMBER, buildWhatsAppUrl } from "@/lib/whatsapp";
+import { playOrderChime } from "@/lib/admin-notifications";
+import { createClient } from "@/utils/supabase/client";
 
 interface OrderItem {
   id?: string;
@@ -58,6 +64,14 @@ interface OrderHistorySectionProps {
   isDedicatedPage?: boolean;
 }
 
+interface StatusAlertPayload {
+  orderNumber: string;
+  oldStatus?: string;
+  newStatus: string;
+  trackingInfo?: string;
+  message: string;
+}
+
 export default function OrderHistorySection({ isDedicatedPage = false }: OrderHistorySectionProps) {
   const { openOrderModal } = useOrder();
 
@@ -69,138 +83,17 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
   const [activeReceiptOrder, setActiveReceiptOrder] = useState<CustomerOrder | null>(null);
   const [filterTab, setFilterTab] = useState<"all" | "active" | "delivered">("all");
 
-  // Load orders saved locally on this customer's device
-  const loadSavedOrders = useCallback(() => {
-    try {
-      const stored = localStorage.getItem("ember_customer_orders");
-      if (stored) {
-        const parsed: CustomerOrder[] = JSON.parse(stored);
-        setSavedOrders(parsed);
+  // Real-time synchronization states
+  const [isAutoSyncing, setIsAutoSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [secondsAgo, setSecondsAgo] = useState(0);
+  const [statusAlert, setStatusAlert] = useState<StatusAlertPayload | null>(null);
+  const [copiedTrackingId, setCopiedTrackingId] = useState<string | null>(null);
 
-        // Background refresh from server for live status updates
-        if (parsed.length > 0) {
-          refreshOrdersStatus(parsed);
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  }, []);
-
-  // Poll server for live status of saved orders
-  const refreshOrdersStatus = async (localOrders: CustomerOrder[]) => {
-    try {
-      const numbersToFetch = localOrders.slice(0, 5).map((o) => o.order_number);
-      for (const num of numbersToFetch) {
-        const res = await fetch(`/api/orders?query=${encodeURIComponent(num)}`);
-        const data = await res.json();
-        if (data.orders && data.orders.length > 0) {
-          const freshOrder = data.orders[0];
-          setSavedOrders((prev) =>
-            prev.map((o) =>
-              o.order_number === freshOrder.order_number
-                ? {
-                    ...o,
-                    status: freshOrder.status,
-                    tracking_info: freshOrder.tracking_info,
-                    total: freshOrder.total || o.total,
-                    order_items: freshOrder.order_items || o.order_items,
-                  }
-                : o
-            )
-          );
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  };
-
-  useEffect(() => {
-    loadSavedOrders();
-
-    const handleUpdate = () => loadSavedOrders();
-    window.addEventListener("ember_orders_updated", handleUpdate);
-    window.addEventListener("storage", handleUpdate);
-
-    return () => {
-      window.removeEventListener("ember_orders_updated", handleUpdate);
-      window.removeEventListener("storage", handleUpdate);
-    };
-  }, [loadSavedOrders]);
-
-  // Check URL search parameters on client mount (e.g. /track?phone=... or /track?query=...)
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const urlQuery = params.get("query") || params.get("order") || params.get("phone");
-      if (urlQuery && urlQuery.trim()) {
-        const clean = urlQuery.trim();
-        setQuery(clean);
-        setIsSearching(true);
-        setHasSearched(true);
-        fetch(`/api/orders?query=${encodeURIComponent(clean)}`)
-          .then((res) => res.json())
-          .then((data) => {
-            if (data.orders) {
-              setSearchResults(data.orders);
-            }
-          })
-          .catch(() => {})
-          .finally(() => setIsSearching(false));
-      }
-    }
-  }, []);
-
-  // Handle Search Submission
-  const handleSearch = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const cleanQuery = query.trim();
-    if (!cleanQuery) return;
-
-    setIsSearching(true);
-    setHasSearched(true);
-
-    try {
-      const res = await fetch(`/api/orders?query=${encodeURIComponent(cleanQuery)}`);
-      const data = await res.json();
-      if (data.orders) {
-        setSearchResults(data.orders);
-      } else {
-        setSearchResults([]);
-      }
-    } catch (err) {
-      console.error("Order search error:", err);
-      // Fallback search in local orders
-      const localMatches = savedOrders.filter(
-        (o) =>
-          o.order_number.toLowerCase().includes(cleanQuery.toLowerCase()) ||
-          o.customer_phone.includes(cleanQuery)
-      );
-      setSearchResults(localMatches);
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  const handleClearSearch = () => {
-    setQuery("");
-    setSearchResults(null);
-    setHasSearched(false);
-  };
-
-  // Determine list of orders to display
-  const displayedOrders = searchResults !== null ? searchResults : savedOrders;
-
-  const filteredOrders = displayedOrders.filter((order) => {
-    if (filterTab === "active") {
-      return ["pending", "processing", "shipped"].includes(order.status);
-    }
-    if (filterTab === "delivered") {
-      return order.status === "delivered";
-    }
-    return true;
-  });
+  // References to prevent race conditions during background sync
+  const activeSearchQueryRef = useRef<string>("");
+  const isSyncingRef = useRef<boolean>(false);
+  const prevStatusesRef = useRef<Map<string, { status: string; tracking: string | null }>>(new Map());
 
   const getStatusBadge = (status: CustomerOrder["status"]) => {
     switch (status) {
@@ -243,6 +136,322 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
     }
   };
 
+  // Inspect incoming orders for live status changes and notify customer
+  const checkAndNotifyChanges = useCallback((freshOrders: CustomerOrder[]) => {
+    for (const fresh of freshOrders) {
+      const existing = prevStatusesRef.current.get(fresh.order_number);
+      if (existing) {
+        const statusChanged = existing.status !== fresh.status;
+        const trackingChanged = Boolean(
+          fresh.tracking_info && existing.tracking !== fresh.tracking_info
+        );
+
+        if (statusChanged || trackingChanged) {
+          // Play acoustic order chime
+          playOrderChime(0.65);
+
+          const badge = getStatusBadge(fresh.status);
+          const msg = statusChanged
+            ? `Consignment #${fresh.order_number} status updated to: "${badge.label}"!`
+            : `Courier tracking details added for #${fresh.order_number}: ${fresh.tracking_info}`;
+
+          setStatusAlert({
+            orderNumber: fresh.order_number,
+            oldStatus: existing.status,
+            newStatus: fresh.status,
+            trackingInfo: fresh.tracking_info,
+            message: msg,
+          });
+
+          // Auto-clear alert banner after 8 seconds
+          setTimeout(() => {
+            setStatusAlert((curr) => (curr?.orderNumber === fresh.order_number ? null : curr));
+          }, 8000);
+        }
+      }
+
+      // Record latest snapshot in map
+      prevStatusesRef.current.set(fresh.order_number, {
+        status: fresh.status,
+        tracking: fresh.tracking_info || null,
+      });
+    }
+  }, []);
+
+  // Primary background sync routine
+  const syncOrders = useCallback(
+    async (isSilent = true) => {
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
+      if (!isSilent) setIsAutoSyncing(true);
+
+      try {
+        // 1. Sync active search query if present
+        const activeQ = activeSearchQueryRef.current.trim();
+        if (activeQ) {
+          const res = await fetch(`/api/orders?query=${encodeURIComponent(activeQ)}`);
+          const data = await res.json();
+          if (data.orders && Array.isArray(data.orders)) {
+            checkAndNotifyChanges(data.orders);
+            setSearchResults(data.orders);
+          }
+        }
+
+        // 2. Sync saved local orders
+        const stored = typeof window !== "undefined" ? localStorage.getItem("ember_customer_orders") : null;
+        if (stored) {
+          try {
+            const localOrders: CustomerOrder[] = JSON.parse(stored);
+            if (localOrders.length > 0) {
+              const promises = localOrders.slice(0, 5).map(async (o) => {
+                try {
+                  const r = await fetch(`/api/orders?query=${encodeURIComponent(o.order_number)}`);
+                  const d = await r.json();
+                  return d.orders?.[0] || null;
+                } catch {
+                  return null;
+                }
+              });
+
+              const fetched = (await Promise.all(promises)).filter(Boolean) as CustomerOrder[];
+              if (fetched.length > 0) {
+                checkAndNotifyChanges(fetched);
+                setSavedOrders((prev) => {
+                  const updated = prev.map((old) => {
+                    const fresh = fetched.find((f) => f.order_number === old.order_number);
+                    return fresh
+                      ? {
+                          ...old,
+                          status: fresh.status,
+                          tracking_info: fresh.tracking_info,
+                          total: fresh.total || old.total,
+                          order_items: fresh.order_items || old.order_items,
+                        }
+                      : old;
+                  });
+                  try {
+                    localStorage.setItem("ember_customer_orders", JSON.stringify(updated));
+                  } catch {}
+                  return updated;
+                });
+              }
+            }
+          } catch {
+            // Ignore JSON parse errors
+          }
+        }
+
+        setLastSyncedAt(new Date());
+      } catch (err) {
+        console.warn("Background order sync warning:", err);
+      } finally {
+        isSyncingRef.current = false;
+        setIsAutoSyncing(false);
+      }
+    },
+    [checkAndNotifyChanges]
+  );
+
+  // Load orders saved locally on this customer's device
+  const loadSavedOrders = useCallback(() => {
+    try {
+      const stored = localStorage.getItem("ember_customer_orders");
+      if (stored) {
+        const parsed: CustomerOrder[] = JSON.parse(stored);
+        setSavedOrders(parsed);
+
+        // Seed current statuses into map
+        parsed.forEach((o) => {
+          if (!prevStatusesRef.current.has(o.order_number)) {
+            prevStatusesRef.current.set(o.order_number, {
+              status: o.status,
+              tracking: o.tracking_info || null,
+            });
+          }
+        });
+
+        // Background refresh from server for live status updates
+        if (parsed.length > 0) {
+          syncOrders(true);
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }, [syncOrders]);
+
+  useEffect(() => {
+    loadSavedOrders();
+
+    const handleUpdate = () => loadSavedOrders();
+    window.addEventListener("ember_orders_updated", handleUpdate);
+    window.addEventListener("storage", handleUpdate);
+
+    return () => {
+      window.removeEventListener("ember_orders_updated", handleUpdate);
+      window.removeEventListener("storage", handleUpdate);
+    };
+  }, [loadSavedOrders]);
+
+  // Check URL search parameters on client mount (e.g. /track?phone=... or /track?query=...)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const urlQuery = params.get("query") || params.get("order") || params.get("phone");
+      if (urlQuery && urlQuery.trim()) {
+        const clean = urlQuery.trim();
+        setQuery(clean);
+        activeSearchQueryRef.current = clean;
+        setIsSearching(true);
+        setHasSearched(true);
+        fetch(`/api/orders?query=${encodeURIComponent(clean)}`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.orders) {
+              checkAndNotifyChanges(data.orders);
+              setSearchResults(data.orders);
+              setLastSyncedAt(new Date());
+            }
+          })
+          .catch(() => {})
+          .finally(() => setIsSearching(false));
+      }
+    }
+  }, [checkAndNotifyChanges]);
+
+  // Periodic Auto-Polling (Every 4 seconds for true live tracking)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        syncOrders(true);
+      }
+    }, 4000);
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        syncOrders(true);
+      }
+    };
+
+    const handleFocus = () => {
+      syncOrders(true);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleFocus);
+    };
+  }, [syncOrders]);
+
+  // Supabase Real-time postgres_changes listener for instantaneous push updates
+  useEffect(() => {
+    let channel: any = null;
+    try {
+      const supabase = createClient();
+      channel = supabase
+        .channel("customer-tracking-live-stream")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "orders" },
+          () => {
+            syncOrders(true);
+          }
+        )
+        .subscribe();
+    } catch (err) {
+      console.warn("Realtime subscription fallback to polling:", err);
+    }
+
+    return () => {
+      if (channel) {
+        try {
+          const supabase = createClient();
+          supabase.removeChannel(channel);
+        } catch {}
+      }
+    };
+  }, [syncOrders]);
+
+  // Seconds ago tick counter for UI badge
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (lastSyncedAt) {
+        const diff = Math.max(0, Math.floor((Date.now() - lastSyncedAt.getTime()) / 1000));
+        setSecondsAgo(diff);
+      }
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [lastSyncedAt]);
+
+  // Handle Search Submission
+  const handleSearch = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return;
+
+    activeSearchQueryRef.current = cleanQuery;
+    setIsSearching(true);
+    setHasSearched(true);
+
+    try {
+      const res = await fetch(`/api/orders?query=${encodeURIComponent(cleanQuery)}`);
+      const data = await res.json();
+      if (data.orders) {
+        checkAndNotifyChanges(data.orders);
+        setSearchResults(data.orders);
+        setLastSyncedAt(new Date());
+      } else {
+        setSearchResults([]);
+      }
+    } catch (err) {
+      console.error("Order search error:", err);
+      // Fallback search in local orders
+      const localMatches = savedOrders.filter(
+        (o) =>
+          o.order_number.toLowerCase().includes(cleanQuery.toLowerCase()) ||
+          o.customer_phone.includes(cleanQuery)
+      );
+      setSearchResults(localMatches);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleClearSearch = () => {
+    setQuery("");
+    activeSearchQueryRef.current = "";
+    setSearchResults(null);
+    setHasSearched(false);
+  };
+
+  const handleCopyTracking = (trackingText: string) => {
+    if (!trackingText) return;
+    navigator.clipboard.writeText(trackingText);
+    setCopiedTrackingId(trackingText);
+    setTimeout(() => {
+      setCopiedTrackingId(null);
+    }, 2500);
+  };
+
+  // Determine list of orders to display
+  const displayedOrders = searchResults !== null ? searchResults : savedOrders;
+
+  const filteredOrders = displayedOrders.filter((order) => {
+    if (filterTab === "active") {
+      return ["pending", "processing", "shipped"].includes(order.status);
+    }
+    if (filterTab === "delivered") {
+      return order.status === "delivered";
+    }
+    return true;
+  });
+
   const handleReorder = (order: CustomerOrder) => {
     const matchedProduct =
       (order.order_items?.[0] &&
@@ -272,17 +481,23 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
               <span>Back to Storefront</span>
             </Link>
 
-            <span className="text-[11px] text-[#8E959E] font-medium hidden sm:inline">
-              Ember Dust Consignment Tracking Portal
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span className="text-[11px] text-[#8E959E] font-medium hidden sm:inline">
+                Ember Dust Live Consignment Tracking
+              </span>
+            </div>
           </div>
         )}
 
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-10">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#B8935A]/15 border border-[#B8935A]/30 text-[#B8935A] text-xs font-bold uppercase tracking-wider">
-            <Package className="w-3.5 h-3.5" />
-            <span>Consignment Tracking &amp; History</span>
+            <Radio className="w-3.5 h-3.5 animate-pulse text-[#25D366]" />
+            <span>Live Consignment Tracking &amp; History</span>
           </div>
 
           <h2 className="text-3xl sm:text-5xl font-extrabold text-white tracking-tight">
@@ -290,13 +505,13 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
           </h2>
 
           <p className="text-sm sm:text-base text-[#8E959E] leading-relaxed">
-            Enter your <strong className="text-white">Order ID</strong> (e.g. ED-20261005-XXXX) or{" "}
-            <strong className="text-white">Mobile Number</strong> to check live dispatch status, courier tracking, and order history.
+            Enter your <strong className="text-white">Order ID</strong> (e.g. ED-20261009-XXXX) or{" "}
+            <strong className="text-white">Mobile Number</strong> to check real-time dispatch status, courier AWB tracking, and digital receipt.
           </p>
         </div>
 
         {/* Search Bar Card */}
-        <div className="max-w-2xl mx-auto mb-10">
+        <div className="max-w-2xl mx-auto mb-8">
           <form
             onSubmit={handleSearch}
             className="flex flex-col sm:flex-row items-center gap-2 bg-[#222429] p-2 rounded-2xl border border-white/10 shadow-2xl focus-within:border-[#B8935A] transition-all"
@@ -307,7 +522,7 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Enter Order ID (ED-XXXX) or Phone Number..."
+                placeholder="Enter Order ID (ED-XXXX) or Phone Number (e.g. 7006506721)..."
                 className="bg-transparent text-white placeholder-[#8E959E] text-sm font-medium w-full focus:outline-none py-2"
               />
               {query && (
@@ -363,12 +578,86 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
           </div>
         </div>
 
+        {/* Live Real-time Status Sync Banner */}
+        {displayedOrders.length > 0 && (
+          <div className="max-w-4xl mx-auto mb-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-[#222429]/90 border border-emerald-500/30 px-4 py-2.5 rounded-2xl shadow-lg backdrop-blur-md">
+              <div className="flex items-center gap-2.5">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_8px_#10B981]"></span>
+                </span>
+                <span className="text-xs font-bold text-white tracking-wide flex items-center gap-2">
+                  <span className="text-emerald-400">Live Real-time Sync Active</span>
+                  <span className="hidden sm:inline text-[#8E959E] font-normal">• Auto-syncs every 4s</span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] text-[#8E959E] font-mono">
+                  {isAutoSyncing ? (
+                    <span className="text-[#F5C26B] font-semibold flex items-center gap-1">
+                      <RotateCcw className="w-3 h-3 animate-spin" /> Syncing...
+                    </span>
+                  ) : lastSyncedAt ? (
+                    <span>Synced {secondsAgo === 0 ? "just now" : `${secondsAgo}s ago`}</span>
+                  ) : (
+                    <span>Connected</span>
+                  )}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => syncOrders(false)}
+                  disabled={isAutoSyncing}
+                  title="Force refresh live status now"
+                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border border-white/10 transition-all cursor-pointer active:scale-95 flex items-center gap-1 text-[11px] font-bold"
+                >
+                  <RotateCcw className={`w-3.5 h-3.5 ${isAutoSyncing ? "animate-spin text-[#B8935A]" : ""}`} />
+                  <span className="hidden sm:inline">Refresh</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Real-time Status Change Alert Banner */}
+        {statusAlert && (
+          <div className="max-w-4xl mx-auto mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-950/90 via-[#222429] to-emerald-950/90 border border-emerald-500/50 shadow-2xl flex items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-4 duration-300">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0 mt-0.5 sm:mt-0">
+                <Zap className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Live Status Update
+                  </span>
+                  <span className="text-xs font-mono font-bold text-white">
+                    #{statusAlert.orderNumber}
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm font-semibold text-emerald-100 mt-1">
+                  {statusAlert.message}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setStatusAlert(null)}
+              className="p-1 rounded-full text-emerald-300/60 hover:text-emerald-100 hover:bg-white/10 shrink-0 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Status Filter Tabs */}
         {displayedOrders.length > 0 && (
           <div className="flex items-center justify-center gap-2 mb-8">
             <button
               onClick={() => setFilterTab("all")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 filterTab === "all"
                   ? "bg-[#B8935A] text-[#181A1D] shadow-md"
                   : "bg-white/5 text-[#8E959E] hover:text-white"
@@ -378,7 +667,7 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
             </button>
             <button
               onClick={() => setFilterTab("active")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 filterTab === "active"
                   ? "bg-[#B8935A] text-[#181A1D] shadow-md"
                   : "bg-white/5 text-[#8E959E] hover:text-white"
@@ -388,7 +677,7 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
             </button>
             <button
               onClick={() => setFilterTab("delivered")}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                 filterTab === "delivered"
                   ? "bg-[#B8935A] text-[#181A1D] shadow-md"
                   : "bg-white/5 text-[#8E959E] hover:text-white"
@@ -401,7 +690,7 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
 
         {/* Orders Listing */}
         {filteredOrders.length > 0 ? (
-          <div className="space-y-6">
+          <div className="space-y-6 max-w-4xl mx-auto">
             {filteredOrders.map((order) => {
               const badge = getStatusBadge(order.status);
               const itemsList =
@@ -418,13 +707,13 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
 
               const whatsappInquiryUrl = buildWhatsAppUrl(
                 DEFAULT_WHATSAPP_NUMBER,
-                `Hello Ember Dust 👋 I would like to get an update on my order ${order.order_number}. Customer Name: ${order.customer_name}.`
+                `Hello Ember Dust 👋 I would like to get a live update on my consignment ${order.order_number}. Customer Name: ${order.customer_name}.`
               );
 
               return (
                 <div
                   key={order.order_number || order.id}
-                  className="bg-[#222429] border border-white/10 rounded-3xl p-5 sm:p-7 shadow-xl hover:border-white/20 transition-all space-y-6"
+                  className="bg-[#222429] border border-white/10 rounded-3xl p-5 sm:p-7 shadow-xl hover:border-white/20 transition-all space-y-6 relative overflow-hidden"
                 >
                   {/* Card Top: Order Number, Date, Status */}
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-white/10">
@@ -434,8 +723,9 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
                           {order.order_number}
                         </span>
                         <span
-                          className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${badge.color}`}
+                          className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border flex items-center gap-1.5 ${badge.color}`}
                         >
+                          <span className="w-1.5 h-1.5 rounded-full bg-current animate-ping" />
                           {badge.label}
                         </span>
                       </div>
@@ -463,19 +753,21 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
                     </div>
                   </div>
 
-                  {/* Visual Fulfillment Step Pipeline */}
+                  {/* Visual Fulfillment Step Pipeline with Pulsing Active Step */}
                   <div className="py-2">
                     <div className="grid grid-cols-4 gap-2 text-center text-xs">
                       {/* Step 1: Received */}
                       <div className="space-y-1.5">
                         <div
-                          className={`w-7 h-7 mx-auto rounded-full flex items-center justify-center text-xs font-bold ${
-                            badge.step >= 1
+                          className={`w-7 h-7 mx-auto rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                            badge.step === 1
+                              ? "bg-[#25D366] text-black ring-4 ring-[#25D366]/30 animate-pulse font-black"
+                              : badge.step > 1
                               ? "bg-[#25D366] text-black"
                               : "bg-white/10 text-white/40"
                           }`}
                         >
-                          ✓
+                          {badge.step > 1 ? "✓" : "1"}
                         </div>
                         <div className={`font-bold text-[11px] ${badge.step >= 1 ? "text-white" : "text-white/40"}`}>
                           Order Placed
@@ -485,13 +777,15 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
                       {/* Step 2: Processing */}
                       <div className="space-y-1.5">
                         <div
-                          className={`w-7 h-7 mx-auto rounded-full flex items-center justify-center text-xs font-bold ${
-                            badge.step >= 2
+                          className={`w-7 h-7 mx-auto rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                            badge.step === 2
+                              ? "bg-[#25D366] text-black ring-4 ring-[#25D366]/30 animate-pulse font-black"
+                              : badge.step > 2
                               ? "bg-[#25D366] text-black"
                               : "bg-white/10 text-white/40"
                           }`}
                         >
-                          2
+                          {badge.step > 2 ? "✓" : "2"}
                         </div>
                         <div className={`font-bold text-[11px] ${badge.step >= 2 ? "text-white" : "text-white/40"}`}>
                           Triple-Sieved
@@ -501,13 +795,15 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
                       {/* Step 3: Shipped */}
                       <div className="space-y-1.5">
                         <div
-                          className={`w-7 h-7 mx-auto rounded-full flex items-center justify-center text-xs font-bold ${
-                            badge.step >= 3
+                          className={`w-7 h-7 mx-auto rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                            badge.step === 3
+                              ? "bg-[#25D366] text-black ring-4 ring-[#25D366]/30 animate-pulse font-black"
+                              : badge.step > 3
                               ? "bg-[#25D366] text-black"
                               : "bg-white/10 text-white/40"
                           }`}
                         >
-                          3
+                          {badge.step > 3 ? "✓" : "3"}
                         </div>
                         <div className={`font-bold text-[11px] ${badge.step >= 3 ? "text-white" : "text-white/40"}`}>
                           Dispatched
@@ -517,13 +813,13 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
                       {/* Step 4: Delivered */}
                       <div className="space-y-1.5">
                         <div
-                          className={`w-7 h-7 mx-auto rounded-full flex items-center justify-center text-xs font-bold ${
-                            badge.step >= 4
-                              ? "bg-[#25D366] text-black"
+                          className={`w-7 h-7 mx-auto rounded-full flex items-center justify-center text-xs font-bold transition-all ${
+                            badge.step === 4
+                              ? "bg-[#25D366] text-black ring-4 ring-[#25D366]/30 font-black"
                               : "bg-white/10 text-white/40"
                           }`}
                         >
-                          4
+                          {badge.step === 4 ? "✓" : "4"}
                         </div>
                         <div className={`font-bold text-[11px] ${badge.step >= 4 ? "text-white" : "text-white/40"}`}>
                           Delivered
@@ -534,7 +830,7 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
                     {/* Progress Connecting Bar */}
                     <div className="relative mt-2.5 h-1.5 bg-white/10 rounded-full overflow-hidden mx-6">
                       <div
-                        className="absolute top-0 bottom-0 left-0 bg-[#25D366] transition-all duration-500 rounded-full"
+                        className="absolute top-0 bottom-0 left-0 bg-[#25D366] transition-all duration-700 ease-out rounded-full"
                         style={{
                           width: `${Math.min(100, Math.max(15, (badge.step / 4) * 100))}%`,
                         }}
@@ -542,19 +838,39 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
                     </div>
                   </div>
 
-                  {/* Tracking info if present */}
+                  {/* Courier Tracking info with Copy Action */}
                   {order.tracking_info && (
-                    <div className="bg-[#181A1D] border border-[#B8935A]/30 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="bg-[#181A1D] border border-[#B8935A]/30 rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                       <div className="flex items-center gap-2.5">
                         <Truck className="w-4 h-4 text-[#B8935A] shrink-0" />
                         <div>
-                          <span className="text-[#8E959E]">Courier Tracking: </span>
+                          <span className="text-[#8E959E]">Courier AWB / Tracking ID: </span>
                           <strong className="text-white font-mono">{order.tracking_info}</strong>
                         </div>
                       </div>
-                      <span className="text-[10px] bg-[#B8935A]/20 text-[#B8935A] px-2 py-0.5 rounded font-bold">
-                        Live Tracking
-                      </span>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCopyTracking(order.tracking_info || "")}
+                          className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-[#D8CBB6] hover:text-white border border-white/10 flex items-center gap-1.5 text-[11px] font-bold cursor-pointer transition-all"
+                        >
+                          {copiedTrackingId === order.tracking_info ? (
+                            <>
+                              <Check className="w-3 h-3 text-[#25D366]" />
+                              <span className="text-[#25D366]">Copied</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              <span>Copy ID</span>
+                            </>
+                          )}
+                        </button>
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded font-bold border border-emerald-500/30">
+                          Live Courier Sync
+                        </span>
+                      </div>
                     </div>
                   )}
 
@@ -643,12 +959,12 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
             </p>
 
             <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
-              <a
-                href="#products"
-                className="w-full sm:w-auto px-6 py-3 rounded-full bg-[#B8935A] hover:bg-[#A37F46] text-[#181A1D] font-extrabold text-xs transition-all shadow-md"
+              <Link
+                href="/#products"
+                className="w-full sm:w-auto px-6 py-3 rounded-full bg-[#B8935A] hover:bg-[#A37F46] text-[#181A1D] font-extrabold text-xs transition-all shadow-md inline-block text-center"
               >
                 Browse Wood Ash Blends
-              </a>
+              </Link>
 
               <a
                 href={buildWhatsAppUrl(
@@ -673,7 +989,7 @@ export default function OrderHistorySection({ isDedicatedPage = false }: OrderHi
           <div className="bg-[#181A1D] border border-white/15 rounded-3xl max-w-md w-full p-6 text-left space-y-5 shadow-2xl relative">
             <button
               onClick={() => setActiveReceiptOrder(null)}
-              className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white"
+              className="absolute top-4 right-4 p-1.5 rounded-full hover:bg-white/10 text-white/50 hover:text-white cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
