@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   X,
   CheckCircle2,
@@ -567,14 +568,14 @@ export default function OrderModal({
                 <span>Open WhatsApp to Track Delivery</span>
               </a>
 
-              <a
-                href="#order-history"
+              <Link
+                href="/track"
                 onClick={onClose}
                 className="w-full flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 text-white py-3 px-6 rounded-2xl font-bold text-xs border border-white/15 transition-all text-center"
               >
                 <Package className="w-3.5 h-3.5 text-[#B8935A]" />
                 <span>View in Live Order History & Tracking</span>
-              </a>
+              </Link>
 
               <button
                 onClick={onClose}

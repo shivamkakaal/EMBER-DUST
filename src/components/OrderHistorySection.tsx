@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import {
   Package,
   Search,
@@ -20,6 +21,7 @@ import {
   X,
   Sparkles,
   ShoppingBag,
+  ArrowLeft,
 } from "lucide-react";
 import { useOrder } from "@/context/OrderContext";
 import { PRODUCTS, getProductBySlug } from "@/lib/products";
@@ -52,7 +54,11 @@ export interface CustomerOrder {
   order_items?: OrderItem[];
 }
 
-export default function OrderHistorySection() {
+interface OrderHistorySectionProps {
+  isDedicatedPage?: boolean;
+}
+
+export default function OrderHistorySection({ isDedicatedPage = false }: OrderHistorySectionProps) {
   const { openOrderModal } = useOrder();
 
   const [query, setQuery] = useState("");
@@ -122,6 +128,29 @@ export default function OrderHistorySection() {
       window.removeEventListener("storage", handleUpdate);
     };
   }, [loadSavedOrders]);
+
+  // Check URL search parameters on client mount (e.g. /track?phone=... or /track?query=...)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const urlQuery = params.get("query") || params.get("order") || params.get("phone");
+      if (urlQuery && urlQuery.trim()) {
+        const clean = urlQuery.trim();
+        setQuery(clean);
+        setIsSearching(true);
+        setHasSearched(true);
+        fetch(`/api/orders?query=${encodeURIComponent(clean)}`)
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.orders) {
+              setSearchResults(data.orders);
+            }
+          })
+          .catch(() => {})
+          .finally(() => setIsSearching(false));
+      }
+    }
+  }, []);
 
   // Handle Search Submission
   const handleSearch = async (e?: React.FormEvent) => {
@@ -232,6 +261,23 @@ export default function OrderHistorySection() {
       <div className="absolute bottom-0 left-0 w-96 h-96 bg-[#25D366]/5 rounded-full blur-3xl pointer-events-none" />
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+        {/* Dedicated Page Breadcrumb / Navigation */}
+        {isDedicatedPage && (
+          <div className="mb-8 pt-2 flex items-center justify-between border-b border-white/10 pb-4">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-xs font-bold text-[#D8CBB6] hover:text-[#B8935A] bg-white/5 hover:bg-white/10 px-4 py-2 rounded-full border border-white/10 transition-all cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Storefront</span>
+            </Link>
+
+            <span className="text-[11px] text-[#8E959E] font-medium hidden sm:inline">
+              Ember Dust Consignment Tracking Portal
+            </span>
+          </div>
+        )}
+
         {/* Section Header */}
         <div className="text-center max-w-3xl mx-auto space-y-3 mb-10">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-[#B8935A]/15 border border-[#B8935A]/30 text-[#B8935A] text-xs font-bold uppercase tracking-wider">

@@ -89,13 +89,13 @@ export default function Navbar() {
             >
               Ceramics
             </a>
-            <a
-              href="#order-history"
+            <Link
+              href="/track"
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#B8935A]/10 hover:bg-[#B8935A]/20 border border-[#B8935A]/30 text-[#B8935A] transition-all whitespace-nowrap"
             >
               <Package className="w-3.5 h-3.5" />
               <span>Track Order</span>
-            </a>
+            </Link>
             <a
               href="#faq"
               className="hover:text-[#B8935A] transition-colors py-1 whitespace-nowrap"
@@ -166,8 +166,8 @@ export default function Navbar() {
               <span className="text-xs text-[#B8935A]">⚡</span>
             </a>
 
-            <a
-              href="#order-history"
+            <Link
+              href="/track"
               onClick={() => setMobileMenuOpen(false)}
               className="hover:text-[#B8935A] py-1.5 px-1 border-b border-[#D8CBB6]/40 flex items-center justify-between text-[#B8935A] font-bold"
             >
@@ -178,7 +178,7 @@ export default function Navbar() {
               <span className="text-[10px] bg-[#B8935A]/15 text-[#B8935A] px-2 py-0.5 rounded-full font-bold">
                 Live Status
               </span>
-            </a>
+            </Link>
 
             <a
               href="#gardening"
